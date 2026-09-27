@@ -1,98 +1,120 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Redirect, useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { Dimensions, StyleSheet, View } from 'react-native';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { CompanionForm } from '@/components/companion-form';
+import { QuietPressable } from '@/components/controls';
+import { Screen, useScreenPadding } from '@/components/screen';
+import { Label, Tiny } from '@/components/text';
+import { useAmbientAudio } from '@/hooks/use-ambient-audio';
+import { usePresence } from '@/hooks/use-presence';
+import { useCompanion } from '@/state/companion';
+import { colors, spacing } from '@/theme';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+const { width } = Dimensions.get('window');
+const FORM_SIZE = Math.min(width * 0.56, 240);
 
 export default function HomeScreen() {
+  const { state, status, decay } = useCompanion();
+  const router = useRouter();
+  const padding = useScreenPadding();
+  const [focused, setFocused] = useState(false);
+  const [showWhisper, setShowWhisper] = useState(false);
+
+  const ready = status === 'ready';
+  const needsOnboarding = ready && !state.onboarded;
+  const isDead = ready && state.plantedAt !== null && decay.dead;
+  const interactive = ready && !needsOnboarding && !isDead;
+
+  const stayed = usePresence(focused && interactive);
+  useAmbientAudio(focused && interactive);
+
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
+
+  useEffect(() => {
+    if (!stayed) {
+      setShowWhisper(false);
+      return;
+    }
+    setShowWhisper(true);
+    const timer = setTimeout(() => setShowWhisper(false), 4400);
+    return () => clearTimeout(timer);
+  }, [stayed]);
+
+  if (!ready) return <Screen />;
+  if (needsOnboarding) return <Redirect href="/onboarding" />;
+  if (isDead) return <Redirect href="/certificate" />;
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <Screen>
+      <View
+        style={[
+          styles.body,
+          { paddingTop: padding.paddingTop, paddingBottom: padding.paddingBottom },
+        ]}
+      >
+        <View style={styles.stage}>
+          <CompanionForm stage={decay.stage} size={FORM_SIZE} />
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+          <View style={styles.whisperSlot}>
+            {showWhisper ? (
+              <Animated.View entering={FadeIn.duration(1400)} exiting={FadeOut.duration(1800)}>
+                <Label style={styles.whisper}>you stayed.</Label>
+              </Animated.View>
+            ) : null}
+          </View>
+        </View>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        <View style={styles.footer}>
+          <QuietPressable
+            onPress={() => router.push('/settings')}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            style={styles.settings}
+          >
+            <Tiny>settings</Tiny>
+          </QuietPressable>
+        </View>
+      </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  body: {
     flex: 1,
+    paddingHorizontal: spacing.xl,
+    justifyContent: 'space-between',
+  },
+  stage: {
+    flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.xxl,
+  },
+  whisperSlot: {
+    height: 20,
+    justifyContent: 'center',
+  },
+  whisper: {
+    fontSize: 12,
+    letterSpacing: 1.6,
+    color: colors.inkFaint,
+  },
+  footer: {
     flexDirection: 'row',
+    justifyContent: 'flex-start',
+    paddingBottom: spacing.sm,
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  settings: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    opacity: 0.7,
   },
 });
